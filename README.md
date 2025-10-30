@@ -1,4 +1,4 @@
-# <ins> Nvidia 7 </ins> --Enterprise Security & Compliance: Hardening Run.ai + HPC on Rocky Linux
+# <ins> Nvidia 7 </ins> : Enterprise Security & Compliance: Hardening Run.ai + HPC on Rocky Linux
 
 ## Overview
 
@@ -512,6 +512,90 @@ if __name__ == "__main__":
     print(f"Status: {compliance_report['compliance_status']}")
     print(f"Pod Security Compliance: {compliance_report['pod_security']['summary']['compliance_rate']}%")
     print(f"Network Policy Violations: {compliance_report['network_policies']['summary']['namespaces_without_policies']}")
+
+```
+
+---
+
+## Step 5: Automated Security Scanning
+
+```python
+
+# security-scanning-pipeline.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: security-scanning
+  namespace: security
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: trivy-scanner
+            image: aquasec/trivy:0.40.0
+            command:
+            - /bin/sh
+            - -c
+            - |
+              # Scan Kubernetes cluster
+              trivy k8s --report summary cluster
+              
+              # Scan Run.ai namespaces
+              trivy k8s --namespace runai --format json --output /reports/runai-security-scan.json
+              
+              # Scan Slurm namespaces  
+              trivy k8s --namespace slurm --format json --output /reports/slurm-security-scan.json
+            volumeMounts:
+            - name: reports
+              mountPath: /reports
+            - name: kubeconfig
+              mountPath: /root/.kube
+              readOnly: true
+          - name: kube-bench
+            image: aquasec/kube-bench:0.6.8
+            command:
+            - kube-bench
+            - --json
+            - run
+            volumeMounts:
+            - name: reports
+              mountPath: /reports
+            - name: var-lib-kubelet
+              mountPath: /var/lib/kubelet
+              readOnly: true
+            - name: etc-kubernetes
+              mountPath: /etc/kubernetes
+              readOnly: true
+          - name: report-aggregator
+            image: python:3.9
+            command:
+            - python
+            - /scripts/aggregate_reports.py
+            volumeMounts:
+            - name: reports
+              mountPath: /reports
+            - name: scripts
+              mountPath: /scripts
+          restartPolicy: OnFailure
+          volumes:
+          - name: reports
+            persistentVolumeClaim:
+              claimName: security-reports-pvc
+          - name: kubeconfig
+            secret:
+              secretName: kubeconfig-secret
+          - name: var-lib-kubelet
+            hostPath:
+              path: /var/lib/kubelet
+          - name: etc-kubernetes
+            hostPath:
+              path: /etc/kubernetes
+          - name: scripts
+            configMap:
+              name: security-scripts
 
 ```
 
